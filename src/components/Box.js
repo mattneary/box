@@ -6,10 +6,11 @@ import {
 import {withState} from 'recompose'
 import cx from 'classnames'
 
-const EXPIRY = 400
+const EXPIRY = 100
 const WIGGLE = 0.3
 const PERIOD = 60
-const SIZE = 30
+const SIZE = 18
+const SNAP = 3
 const gc = (rn, xs) => xs.filter(({time}) => rn - time <= EXPIRY)
 
 class Box extends Component {
@@ -73,7 +74,7 @@ class Box extends Component {
     ctx.closePath()
   }
 
-  drawRadius = (ctx, point, scalar = 2) => {
+  drawRadius = (ctx, point, scalar = 2, force = 0) => {
     const rotation = 0
     const [x, y, rX, rY] = point
     const width = innerWidth
@@ -103,6 +104,11 @@ class Box extends Component {
     ctx.fillText(xLabel, 4, 4)
     ctx.closePath()
     ctx.restore()
+
+    ctx.beginPath()
+    ctx.fillStyle = 'blue'
+    ctx.fillText(`${force.toFixed(2)} FORCE`, x + (rX || 0) + 4, y + 4)
+    ctx.closePath()
   }
 
   draw = step => {
@@ -128,13 +134,23 @@ class Box extends Component {
         const {point} = last(history)
         if (history) {
           const start = history[0].point
-          const [startX, startY, rX, rY] = start
+          const [startX, startY, rX, rY, force] = start
           const distance = Math.abs(PERIOD - step)
-          const radius = Math.hypot(point[0] - startX, point[1] - startY) / 2
-          this.drawPoint(ctx, 0, start, 1 + WIGGLE * Math.sqrt(distance / (PERIOD / 2)) * Math.log1p(radius / Math.max(rX || 30, rY)))
+          const hypot = Math.hypot(point[0] - startX, point[1] - startY) / 2
+          const overExtended = (hypot / Math.max(rX || SIZE, rY)) > SNAP
+          const radius = overExtended ? SNAP * Math.max(rX || SIZE, rY) : hypot
+          this.drawPoint(ctx, 0, start, 1 + WIGGLE * Math.sqrt(distance / (PERIOD / 2)))
+          if (overExtended) {
+            const factor = SNAP * Math.max(rX || SIZE, rY) / hypot
+            this.drawPoint(ctx, 0, [
+              startX + (point[0] - startX) * factor,
+              startY + (point[1] - startY) * factor,
+              10, 10, force,
+            ])
+          }
           this.drawRadius(
             ctx,
-            [startX, startY, radius, radius],
+            [startX, startY, radius, radius, force],
             step < 6 ? 6 - step + 1 : 2,
           )
         }
@@ -162,28 +178,28 @@ class Box extends Component {
     if (type === 'touchstart') {
       this.props.setTouches({
         ...touches,
-        ...fromPairs(changed.map(({pageX, pageY, radiusX, radiusY, identifier}) => [
+        ...fromPairs(changed.map(({pageX, pageY, radiusX, radiusY, force, identifier}) => [
           identifier,
-          [{time: [rn], point: [pageX, pageY, radiusX, radiusY]}],
+          [{time: [rn], point: [pageX, pageY, radiusX, radiusY, force]}],
         ])),
       })
     } else if (type === 'touchend' || type === 'touchcancel') {
       this.props.setTouches(omit(map('identifier', changed), touches))
       setGhosts([
         ...gc(rn, ghosts),
-        ...changed.map(({pageX, pageY, radiusX, radiusY}) => ({
+        ...changed.map(({pageX, pageY, radiusX, radiusY, force}) => ({
           time: rn,
-          point: [pageX, pageY, radiusX, radiusY],
+          point: [pageX, pageY, radiusX, radiusY, force],
         })),
       ])
     } else {
       this.props.setTouches({
         ...touches,
-        ...fromPairs(changed.map(({pageX, pageY, radiusX, radiusY, identifier}) => [
+        ...fromPairs(changed.map(({pageX, pageY, radiusX, radiusY, force, identifier}) => [
           identifier,
           [...touches[identifier], {
             time: rn,
-            point: [pageX, pageY, radiusX, radiusY],
+            point: [pageX, pageY, radiusX, radiusY, force],
           }],
         ])),
       })
@@ -203,8 +219,8 @@ class Box extends Component {
     return (
       <canvas
         ref={this.getContext}
-        width={innerWidth}
-        height={innerHeight}
+        width={innerWidth * 2}
+        height={innerHeight * 2}
       />
     )
   }
