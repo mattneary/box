@@ -1,7 +1,7 @@
 import {Component} from 'react'
 import {
   toArray, fromPairs, values, omit, compose, map, now, last,
-  initial, flatten, mapValues,
+  initial, flatten, mapValues, inRange, get, any,
 } from 'lodash/fp'
 import {withState} from 'recompose'
 import cx from 'classnames'
@@ -13,26 +13,27 @@ const SIZE = 18
 const SNAP = 3
 const gc = (rn, xs) => xs.filter(({time}) => rn - time <= EXPIRY)
 
+const COLORS = ['red', 'blue', 'yellow', 'black', 'purple', 'orange', 'green']
+
 class Box extends Component {
   componentWillMount() {
     this.draw(0)
   }
 
-  drawPoint = (ctx, t, point, scalar = 1) => {
+  drawPoint = (ctx, t, point, scalar = 1, color = 'black') => {
     const rotation = 0
     const [x, y, rX, rY] = point
     ctx.beginPath()
     ctx.save()
     ctx.globalAlpha = Math.pow(1 - t, 2)
     ctx.ellipse(x, y, scalar * (rX || SIZE), scalar * (rY || SIZE), rotation, 0, 2 * Math.PI, false)
-    ctx.fillStyle = 'white'
+    ctx.fillStyle = color
     ctx.fill()
     ctx.restore()
     ctx.closePath()
   }
 
-  drawCrosshair = (ctx, point) => {
-    ctx.beginPath()
+  drawCrosshair = (ctx, point, color = 'black') => {
     const [x, y] = point
     const width = innerWidth
     const height = innerHeight
@@ -40,17 +41,18 @@ class Box extends Component {
     const ySize = ctx.measureText(yLabel)
     const xLabel = `x = ${x}`
     const xSize = ctx.measureText(xLabel)
+    ctx.beginPath()
     ctx.moveTo(0, y)
     ctx.lineTo(width, y)
     ctx.moveTo(x, 0)
     ctx.lineTo(x, height)
-    ctx.strokeStyle = 'white'
     ctx.lineWidth = 1
+    ctx.strokeStyle = color
     ctx.stroke()
     ctx.closePath()
 
     ctx.beginPath()
-    ctx.fillStyle = 'white'
+    ctx.fillStyle = color
     ctx.font = '14px Futura'
     ctx.fillText(yLabel, width - ySize.width - 10, y - 18)
     ctx.closePath()
@@ -64,26 +66,26 @@ class Box extends Component {
     ctx.restore()
   }
 
-  drawFPS = (ctx, fps) => {
+  drawFPS = (ctx, fps, color) => {
     const label = `${fps.toFixed(0)} FPS`
     const size = ctx.measureText(label)
     ctx.beginPath()
-    ctx.fillStyle = 'white'
+    ctx.fillStyle = color
     ctx.font = '18px Futura'
     ctx.fillText(label, 10, 24)
     ctx.closePath()
   }
 
-  drawRadius = (ctx, point, scalar = 2, force = 0) => {
+  drawRadius = (ctx, point, scalar = 2, color = 'black') => {
     const rotation = 0
-    const [x, y, rX, rY] = point
+    const [x, y, rX, rY, force] = point
     const width = innerWidth
     const height = innerHeight
 
     ctx.beginPath()
     ctx.ellipse(x, y, (rX || SIZE) * 2, (rY || SIZE) * 2, rotation, 0, 2 * Math.PI, false)
     ctx.lineWidth = scalar
-    ctx.strokeStyle = 'white'
+    ctx.strokeStyle = color
     ctx.stroke()
     ctx.closePath()
 
@@ -92,7 +94,7 @@ class Box extends Component {
     const xLabel = rX ? rX.toFixed(2) : '?'
     const xSize = ctx.measureText(xLabel)
     ctx.beginPath()
-    ctx.fillStyle = 'white'
+    ctx.fillStyle = color
     ctx.font = '14px Futura'
     ctx.fillText(yLabel, x + 4, y - (rY || SIZE) * 2 - 4)
     ctx.closePath()
@@ -105,10 +107,12 @@ class Box extends Component {
     ctx.closePath()
     ctx.restore()
 
-    ctx.beginPath()
-    ctx.fillStyle = 'blue'
-    ctx.fillText(`${force.toFixed(2)} FORCE`, x + (rX || 0) + 4, y + 4)
-    ctx.closePath()
+    if (force) {
+      ctx.beginPath()
+      ctx.fillStyle = 'blue'
+      ctx.fillText(`${force.toFixed(2)} FORCE`, x + (rX || 0) + 4, y + 4)
+      ctx.closePath()
+    }
   }
 
   draw = step => {
@@ -126,12 +130,19 @@ class Box extends Component {
       const trails = gc(rn, flatten(values(this.props.touches).map(initial)))
       const ghosts = [...this.props.ghosts, ...trails]
 
-      gc(rn, ghosts).forEach(({time, point}) =>
-         this.drawPoint(ctx, (rn - time) / EXPIRY, point)
+      gc(rn, ghosts).forEach(({time, point, color}) =>
+         this.drawPoint(ctx, (rn - time) / EXPIRY, point, color)
       )
 
+      COLORS.forEach((color, i) => {
+         this.drawPoint(
+           ctx, 0, [20, 80 + SIZE * 3 * i, SIZE, SIZE],
+           1 + (color === this.props.brush ? 0.4 : 0), color,
+         )
+      })
+
       values(this.props.touches).forEach(history => {
-        const {point} = last(history)
+        const {point, color} = last(history)
         if (history) {
           const start = history[0].point
           const [startX, startY, rX, rY, force] = start
@@ -139,31 +150,33 @@ class Box extends Component {
           const hypot = Math.hypot(point[0] - startX, point[1] - startY) / 2
           const overExtended = (hypot / Math.max(rX || SIZE, rY)) > SNAP
           const radius = overExtended ? SNAP * Math.max(rX || SIZE, rY) : hypot
-          this.drawPoint(ctx, 0, start, 1 + WIGGLE * Math.sqrt(distance / (PERIOD / 2)))
+          this.drawPoint(
+            ctx, 0, start, 1 + WIGGLE * Math.sqrt(distance / (PERIOD / 2)), color,
+          )
           if (overExtended) {
             const factor = SNAP * Math.max(rX || SIZE, rY) / hypot
             this.drawPoint(ctx, 0, [
               startX + (point[0] - startX) * factor,
               startY + (point[1] - startY) * factor,
-              10, 10, force,
-            ])
+              10, 10
+            ], force || 1, color)
           }
           this.drawRadius(
-            ctx,
-            [startX, startY, radius, radius, force],
+            ctx, [startX, startY, radius, radius, force],
             step < 6 ? 6 - step + 1 : 2,
+            color,
           )
         }
 
-        this.drawCrosshair(ctx, point)
-        this.drawRadius(ctx, point)
-        this.drawPoint(ctx, 0, point)
+        this.drawCrosshair(ctx, point, color)
+        this.drawRadius(ctx, point, 1, color)
+        this.drawPoint(ctx, 0, point, color)
       })
 
       if (this.props.prevTime !== null) {
         const delta = (rn - this.props.prevTime) / 1e3
         if (!this._fps || step === 0) this._fps = 1 / delta
-        this.drawFPS(ctx, this._fps)
+        this.drawFPS(ctx, this._fps, this.props.brush)
       }
       this.props.setPrevTime(rn)
     }
@@ -175,23 +188,36 @@ class Box extends Component {
     const {touches, ghosts, setGhosts} = this.props
     const rn = now()
     const changed = toArray(evt.changedTouches)
-    if (type === 'touchstart') {
+    if (evt.type === 'touchstart') {
+      console.log(evt)
+    }
+    const inToolbar = ({pageX, pageY}) => pageX < 100 && pageY > 50 && pageY < 450
+    if (any(inToolbar, changed)) {
+      const evt = changed.find(inToolbar)
+      const color = COLORS[Math.floor((evt.pageY - 62) / 54)]
+      this.props.setBrush(color)
+    } if (type === 'touchstart') {
       this.props.setTouches({
         ...touches,
         ...fromPairs(changed.map(({pageX, pageY, radiusX, radiusY, force, identifier}) => [
           identifier,
-          [{time: [rn], point: [pageX, pageY, radiusX, radiusY, force]}],
+          [{
+            time: [rn],
+            point: [pageX, pageY, radiusX, radiusY, force],
+            color: this.props.brush,
+          }],
         ])),
       })
     } else if (type === 'touchend' || type === 'touchcancel') {
-      this.props.setTouches(omit(map('identifier', changed), touches))
       setGhosts([
         ...gc(rn, ghosts),
-        ...changed.map(({pageX, pageY, radiusX, radiusY, force}) => ({
+        ...changed.map(({pageX, pageY, radiusX, radiusY, force, identifier}) => ({
           time: rn,
           point: [pageX, pageY, radiusX, radiusY, force],
+          color: get('color', last(touches[identifier])),
         })),
       ])
+      this.props.setTouches(omit(map('identifier', changed), touches))
     } else {
       this.props.setTouches({
         ...touches,
@@ -200,6 +226,7 @@ class Box extends Component {
           [...touches[identifier], {
             time: rn,
             point: [pageX, pageY, radiusX, radiusY, force],
+            color: get('color', last(touches[identifier])) || this.props.brush,
           }],
         ])),
       })
@@ -227,6 +254,7 @@ class Box extends Component {
 }
 
 export default compose(
+  withState('brush', 'setBrush', 'black'),
   withState('prevTime', 'setPrevTime', null),
   withState('touches', 'setTouches', {}),
   withState('ghosts', 'setGhosts', []),
