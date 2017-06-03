@@ -8,7 +8,6 @@ import cx from 'classnames'
 
 const EXPIRY = 1e3
 const gc = (rn, xs) => xs.filter(({time}) => rn - time <= EXPIRY)
-const gcObj = rn => mapValues(xs => gc(rn, xs))
 
 class Box extends Component {
   componentWillMount() {
@@ -125,6 +124,15 @@ class Box extends Component {
       values(this.props.touches).forEach(trail => {
         if (!trail.length) return
         const {point} = last(trail)
+        if (trail.length > 1) {
+          const start = trail[0].point
+          const [startX, startY] = start
+          this.drawPoint(ctx, 0, start)
+          const pyth = (a, b) => Math.sqrt(a * a + b * b) / 2
+          const radius = pyth(point[0] - startX, point[1] - startY)
+          this.drawRadius(ctx, [startX, startY, radius, radius])
+        }
+
         this.drawCrosshair(ctx, point)
         this.drawRadius(ctx, point)
         this.drawPoint(ctx, 0, point)
@@ -137,10 +145,9 @@ class Box extends Component {
     evt.preventDefault()
     const {touches, ghosts, setGhosts} = this.props
     const rn = now()
-    const setTouches = compose(this.props.setTouches, gcObj(rn))
     const changed = toArray(evt.changedTouches)
     if (type === 'touchstart') {
-      setTouches({
+      this.props.setTouches({
         ...touches,
         ...fromPairs(changed.map(({pageX, pageY, radiusX, radiusY, identifier}) => [
           identifier,
@@ -148,7 +155,7 @@ class Box extends Component {
         ])),
       })
     } else if (type === 'touchend' || type === 'touchcancel') {
-      setTouches(omit(map('identifier', changed), touches))
+      this.props.setTouches(omit(map('identifier', changed), touches))
       setGhosts([
         ...gc(rn, ghosts),
         ...changed.map(({pageX, pageY, radiusX, radiusY}) => ({
@@ -157,7 +164,7 @@ class Box extends Component {
         })),
       ])
     } else {
-      setTouches({
+      this.props.setTouches({
         ...touches,
         ...fromPairs(changed.map(({pageX, pageY, radiusX, radiusY, identifier}) => [
           identifier,
