@@ -15,6 +15,87 @@ class Box extends Component {
     this.draw()
   }
 
+  drawPoint = (ctx, t, point) => {
+    const rotation = 0
+    const [x, y, rX, rY] = point
+    ctx.beginPath()
+    ctx.save()
+    ctx.globalAlpha = Math.pow(1 - t, 2)
+    ctx.ellipse(x, y, rX || 30, rY || 30, rotation, 0, 2 * Math.PI, false)
+    ctx.lineWidth = 3
+    ctx.strokeStyle = 'blue'
+    ctx.fillStyle = 'white'
+    ctx.fill()
+    ctx.stroke()
+    ctx.restore()
+    ctx.closePath()
+  }
+
+  drawCrosshair = (ctx, point) => {
+    ctx.beginPath()
+    const [x, y] = point
+    const width = innerWidth
+    const height = innerHeight
+    const yLabel = `y = ${y}`
+    const ySize = ctx.measureText(yLabel)
+    const xLabel = `x = ${x}`
+    const xSize = ctx.measureText(xLabel)
+    ctx.moveTo(0, y)
+    ctx.lineTo(width, y)
+    ctx.moveTo(x, 0)
+    ctx.lineTo(x, height)
+    ctx.strokeStyle = 'blue'
+    ctx.lineWidth = 1
+    ctx.stroke()
+    ctx.closePath()
+
+    ctx.beginPath()
+    ctx.fillStyle = 'blue'
+    ctx.font = '14px Futura'
+    ctx.fillText(yLabel, width - ySize.width - 10, y - 18)
+    ctx.closePath()
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.translate(x + 10, 0)
+    ctx.rotate(Math.PI / 2)
+    ctx.fillText(xLabel, 10, 4)
+    ctx.closePath()
+    ctx.restore()
+  }
+
+  drawRadius = (ctx, point) => {
+    const rotation = 0
+    const [x, y, rX, rY] = point
+    const width = innerWidth
+    const height = innerHeight
+
+    ctx.beginPath()
+    ctx.ellipse(x, y, (rX || 30) * 2, (rY || 30) * 2, rotation, 0, 2 * Math.PI, false)
+    ctx.lineWidth = 1
+    ctx.strokeStyle = 'blue'
+    ctx.stroke()
+    ctx.closePath()
+
+    const yLabel = rY ? rX.toFixed(2) : '?'
+    const ySize = ctx.measureText(yLabel)
+    const xLabel = rX ? rX.toFixed(2) : '?'
+    const xSize = ctx.measureText(xLabel)
+    ctx.beginPath()
+    ctx.fillStyle = 'blue'
+    ctx.font = '14px Futura'
+    ctx.fillText(yLabel, x + 4, y - (rY || 30) * 2 - 4)
+    ctx.closePath()
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.translate(x - (rX || 30) * 2 - 18, y)
+    ctx.rotate(Math.PI / 2)
+    ctx.fillText(xLabel, 4, 4)
+    ctx.closePath()
+    ctx.restore()
+  }
+
   draw = () => {
     const scale = devicePixelRatio
     const width = innerWidth
@@ -33,39 +114,20 @@ class Box extends Component {
       ctx.stroke()
       ctx.closePath()
 
-      const radius = 30
-
       const rn = now()
       const trails = flatten(values(this.props.touches).map(initial))
       const ghosts = [...this.props.ghosts, ...trails]
 
-      gc(rn, ghosts).forEach(
-        ({time, point: [x, y]}) => {
-          const t = (rn - time) / EXPIRY
-          ctx.save()
-          ctx.globalAlpha = Math.pow(1 - t, 2)
-          ctx.beginPath()
-          ctx.arc(x, y, radius, 0, 2 * Math.PI, false)
-          ctx.fillStyle = 'white'
-          ctx.fill()
-          ctx.lineWidth = 3
-          ctx.strokeStyle = 'blue'
-          ctx.stroke()
-          ctx.closePath()
-          ctx.restore()
-        }
+      gc(rn, ghosts).forEach(({time, point}) =>
+         this.drawPoint(ctx, (rn - time) / EXPIRY, point)
       )
 
       values(this.props.touches).forEach(trail => {
-        const {point: [x, y]} = last(trail)
-        ctx.beginPath()
-        ctx.arc(x, y, radius, 0, 2 * Math.PI, false)
-        ctx.fillStyle = 'white'
-        ctx.fill()
-        ctx.lineWidth = 3
-        ctx.strokeStyle = 'blue'
-        ctx.stroke()
-        ctx.closePath()
+        if (!trail.length) return
+        const {point} = last(trail)
+        this.drawCrosshair(ctx, point)
+        this.drawRadius(ctx, point)
+        this.drawPoint(ctx, 0, point)
       })
     }
     requestAnimationFrame(() => this.draw())
@@ -80,28 +142,28 @@ class Box extends Component {
     if (type === 'touchstart') {
       setTouches({
         ...touches,
-        ...fromPairs(changed.map(({pageX, pageY, identifier}) => [
+        ...fromPairs(changed.map(({pageX, pageY, radiusX, radiusY, identifier}) => [
           identifier,
-          [{time: [rn], point: [pageX, pageY]}],
+          [{time: [rn], point: [pageX, pageY, radiusX, radiusY]}],
         ])),
       })
     } else if (type === 'touchend' || type === 'touchcancel') {
       setTouches(omit(map('identifier', changed), touches))
       setGhosts([
         ...gc(rn, ghosts),
-        ...changed.map(({pageX, pageY}) => ({
+        ...changed.map(({pageX, pageY, radiusX, radiusY}) => ({
           time: rn,
-          point: [pageX, pageY],
+          point: [pageX, pageY, radiusX, radiusY],
         })),
       ])
     } else {
       setTouches({
         ...touches,
-        ...fromPairs(changed.map(({pageX, pageY, identifier}) => [
+        ...fromPairs(changed.map(({pageX, pageY, radiusX, radiusY, identifier}) => [
           identifier,
           [...touches[identifier], {
             time: rn,
-            point: [pageX, pageY],
+            point: [pageX, pageY, radiusX, radiusY],
           }],
         ])),
       })
