@@ -1,12 +1,14 @@
 import {Component} from 'react'
 import {
   toArray, fromPairs, values, omit, compose, map, now, last,
-  initial, flatten,
+  initial, flatten, mapValues,
 } from 'lodash/fp'
 import {withState} from 'recompose'
 import cx from 'classnames'
 
 const EXPIRY = 1e3
+const gc = (rn, xs) => xs.filter(({time}) => rn - time <= EXPIRY)
+const gcObj = rn => mapValues(xs => gc(rn, xs))
 
 class Box extends Component {
   componentWillMount() {
@@ -37,7 +39,7 @@ class Box extends Component {
       const trails = flatten(values(this.props.touches).map(initial))
       const ghosts = [...this.props.ghosts, ...trails]
 
-      ghosts.filter(({time}) => rn - time <= EXPIRY).forEach(
+      gc(rn, ghosts).forEach(
         ({time, point: [x, y]}) => {
           const t = (rn - time) / EXPIRY
           ctx.save()
@@ -71,9 +73,10 @@ class Box extends Component {
 
   action = type => evt => {
     evt.preventDefault()
-    const {touches, setTouches, ghosts, setGhosts} = this.props
-    const changed = toArray(evt.changedTouches)
+    const {touches, ghosts, setGhosts} = this.props
     const rn = now()
+    const setTouches = compose(this.props.setTouches, gcObj(rn))
+    const changed = toArray(evt.changedTouches)
     if (type === 'touchstart') {
       setTouches({
         ...touches,
@@ -85,7 +88,7 @@ class Box extends Component {
     } else if (type === 'touchend' || type === 'touchcancel') {
       setTouches(omit(map('identifier', changed), touches))
       setGhosts([
-        ...ghosts.filter(({time}) => (rn - time) < EXPIRY),
+        ...gc(rn, ghosts),
         ...changed.map(({pageX, pageY}) => ({
           time: rn,
           point: [pageX, pageY],
